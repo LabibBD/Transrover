@@ -1,0 +1,80 @@
+import cv2
+import RPi.GPIO as GPIO
+from time import sleep
+import serial
+from pyzbar import pyzbar
+
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(17, GPIO.OUT)
+GPIO.setup(27, GPIO.OUT)
+GPIO.setup(22, GPIO.OUT)
+GPIO.setup(23, GPIO.OUT)
+
+
+
+config_file = "ssd_mobilenet_v3_large_coco_2020_01_14.pbtxt"
+frozen_model = 'frozen_inference_graph.pb'
+
+model = cv2.dnn_DetectionModel(frozen_model, config_file)
+
+classLabels = []
+file_name = 'labels.txt'
+with open(file_name, 'rt') as text:
+    classLabels = text.read().rstrip('\n').split('\n')
+
+model.setInputSize(320,320)
+model.setInputScale(1.0/127.5)
+model.setInputMean((127.5,127.5,127.5))
+model.setInputSwapRB(True)
+
+cap = cv2.VideoCapture(0)
+font_scale = 3
+font = cv2.FONT_HERSHEY_PLAIN
+frameCounter = 0
+arrDataBox = []
+while True:
+    ret,frame = cap.read()
+    frameCounter = frameCounter+1
+    qr = pyzbar.decode(frame)
+    if not (frameCounter % 5):
+        ClassIndex, confidence, bbox = model.detect(frame, confThreshold=0.55)
+        arrDataBox.append([ClassIndex,bbox])
+        for barcode in qr:
+            (x, y, w, h) = barcode.rect
+            barcodeData = barcode.data.decode("utf-8")
+            barcodeType = barcode.type
+            text = "{} ({})".format(barcodeData, barcodeType)
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 2)
+            cv2.putText(frame, text, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5, (0, 0, 255), 2)
+           
+            if text== "o (QRCODE)":
+                GPIO.output(22, 0)         # set GPIO24 to 1/GPIO.HIGH/True  
+                sleep(0.5)                 # wait half a second  
+                GPIO.output(22, 1)  
+            if text== "I (QRCODE)":
+                GPIO.output(23, 0)         # set GPIO24 to 1/GPIO.HIGH/True  
+                sleep(0.5)                 # wait half a second  
+                GPIO.output(23, 1)  
+               
+        if(len(ClassIndex)!=0):
+            for classInd, conf, boxes in zip(ClassIndex.flatten(),confidence.flatten(),bbox):
+                if(classInd<=4):
+                    cv2.rectangle(frame,boxes,(255,0,0),2)
+                    cv2.putText(frame, classLabels[classInd-1],(boxes[0]+10,boxes[1]+40),font, fontScale = font_scale, color=(0,255,0), thickness= 3)
+                   
+                        if classLabels[classInd-1] == "car":
+                            GPIO.output(27, 0)         # set GPIO24 to 1/GPIO.HIGH/True  
+                            sleep(1)                 # wait half a second  
+                            GPIO.output(27, 1)  
+                           
+                        if(classLabels[classInd-1] == "person"):
+                            GPIO.output(17, 0)         # set GPIO24 to 1/GPIO.HIGH/True  
+                            sleep(1)                 # wait half a second  
+                            GPIO.output(17, 1)  
+    cv2.imshow('detected', frame)
+    if cv2.waitKey(2) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
